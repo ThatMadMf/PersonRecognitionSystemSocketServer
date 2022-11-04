@@ -56,7 +56,6 @@ type Socket struct {
 type DeviceAuthorizationDto struct {
 	DeviceId  string `json:"deviceId"`
 	AuthToken string `json:"authToken"`
-	Temp      string `json:"value"`
 }
 
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -91,33 +90,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		switch event.Command {
 		case "authorize-device":
-			var dto DeviceAuthorizationDto
-
-			if err = mapstructure.Decode(event.Data, &dto); err != nil {
-				break
-			}
-
-			token, tokenErr := uuid.Parse(dto.AuthToken)
-
-			if tokenErr != nil {
-				err = tokenErr
-
-				break
-			}
-
-			socket.context = SocketContext{
-				connType:          "INPUT_DEVICE",
-				deviceId:          dto.DeviceId,
-				authorizationUUID: token,
-			}
-
-			response = EventResponse{
-				Uuid:    event.Uuid,
-				Command: event.Command,
-				Result:  "success",
-				Data:    nil,
-			}
-
+			response, err = authorizeDevice(&socket, event)
 		case "face-capture-frame":
 			data := fmt.Sprintf("%v", event.Data)
 			log.Print("Serving frame")
@@ -144,6 +117,32 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 
 	}
+}
+
+func authorizeDevice(socket *Socket, event Event) (EventResponse, error) {
+	var dto DeviceAuthorizationDto
+
+	if err := mapstructure.Decode(event.Data, &dto); err != nil {
+		return EventResponse{}, err
+	}
+
+	token, err := uuid.Parse(dto.AuthToken)
+
+	if err != nil {
+		return EventResponse{}, err
+	}
+
+	socket.context = SocketContext{
+		connType:          "INPUT_DEVICE",
+		deviceId:          dto.DeviceId,
+		authorizationUUID: token,
+	}
+
+	return EventResponse{
+		Uuid:    event.Uuid,
+		Command: event.Command,
+		Result:  "success",
+	}, nil
 }
 
 func serveFrame(rawImage string) {
