@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"github.com/mitchellh/mapstructure"
 	"image/jpeg"
 	"log"
 	"net/http"
@@ -28,8 +30,33 @@ var upgrader = websocket.Upgrader{
 }
 
 type Event struct {
+	Uuid    uuid.UUID   `json:"uuid"`
 	Command string      `json:"command"`
 	Data    interface{} `json:"data"`
+}
+
+type EventResponse struct {
+	Uuid    uuid.UUID   `json:"uuid"`
+	Command string      `json:"command"`
+	Result  string      `json:"result"`
+	Data    interface{} `json:"data"`
+}
+
+type SocketContext struct {
+	connType          string
+	deviceId          string
+	authorizationUUID uuid.UUID
+}
+
+type Socket struct {
+	conn    *websocket.Conn
+	context SocketContext
+}
+
+type DeviceAuthorizationDto struct {
+	DeviceId  string `json:"deviceId"`
+	AuthToken string `json:"authToken"`
+	Temp      string `json:"value"`
 }
 
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -41,6 +68,8 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		conn = upgradedConn
 	}
 
+	socket := Socket{conn: conn}
+
 	defer func() {
 		_ = conn.Close()
 
@@ -51,18 +80,69 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	for {
 		var event Event
-		if err := conn.ReadJSON(&event); err != nil {
+		if err := socket.conn.ReadJSON(&event); err != nil {
 			log.Printf("Could not read json: %v", err.Error())
 
 			break
 		}
 
+		var err error
+		var response EventResponse
+
 		switch event.Command {
+		case "authorize-device":
+			var dto DeviceAuthorizationDto
+
+			if err = mapstructure.Decode(event.Data, &dto); err != nil {
+				break
+			}
+
+			token, tokenErr := uuid.Parse(dto.AuthToken)
+
+			if tokenErr != nil {
+				err = tokenErr
+
+				break
+			}
+
+			socket.context = SocketContext{
+				connType:          "INPUT_DEVICE",
+				deviceId:          dto.DeviceId,
+				authorizationUUID: token,
+			}
+
+			response = EventResponse{
+				Uuid:    event.Uuid,
+				Command: event.Command,
+				Result:  "success",
+				Data:    nil,
+			}
+
 		case "face-capture-frame":
 			data := fmt.Sprintf("%v", event.Data)
 			log.Print("Serving frame")
 			serveFrame(data)
 		}
+
+		if err != nil {
+			log.Printf(
+				"Error during event %s: %v for socket %v",
+				event.Command,
+				err.Error(),
+				socket.context.deviceId,
+			)
+			response = EventResponse{
+				Uuid:    event.Uuid,
+				Command: event.Command,
+				Result:  "error",
+				Data:    err.Error(),
+			}
+		}
+
+		if err = socket.conn.WriteJSON(response); err != nil {
+			log.Printf("Could not send response to socket %s: %v", socket.context.deviceId, socket)
+		}
+
 	}
 }
 
