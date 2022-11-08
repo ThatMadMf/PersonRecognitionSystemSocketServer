@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-var connections = make([]Socket, 0)
+var connections = make([]*Socket, 0)
 var db = GetBunDb()
 
 func main() {
@@ -54,6 +54,7 @@ type SocketContext struct {
 	connType          string
 	userId            string
 	deviceId          string
+	deviceName        string
 	authorizationUUID uuid.UUID
 }
 
@@ -77,6 +78,11 @@ func (s Socket) hasRoom(room string) bool {
 type DeviceAuthorizationDto struct {
 	DeviceId  string `json:"deviceId"`
 	AuthToken string `json:"authToken"`
+}
+
+type DeviceAuthorizedDto struct {
+	DeviceId   string `json:"deviceId"`
+	DeviceName string `json:"deviceName"`
 }
 
 type FaceCaptureFrameDto struct {
@@ -132,7 +138,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		log.Print("Socket connected")
 	}
 
-	connections = append(connections, socket)
+	connections = append(connections, &socket)
 
 	defer func() {
 		_ = conn.Close()
@@ -156,29 +162,42 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		switch event.Command {
 		case "authorize-device":
 			response, err = authorizeDevice(&socket, event)
+		case "get-devices":
+			if socket.context.connType != Admin {
+				err = errors.New("not authorized as admin")
+
+				break
+			}
+
+			response, err = getDevices(event)
 		case "start-capture-session":
 			// Error if session for auth-token exists
 			// Create & return session id if ok
 
 			if socket.context.connType != InputDevice {
 				err = errors.New("not authorized as input device")
+
+				break
 			}
 
 			response, err = startCaptureSession()
 		case "face-capture-frame":
 			if socket.context.connType != InputDevice {
 				err = errors.New("not authorized as input device")
+
+				break
 			}
 
 			response, err = faceCaptureFrame(socket, event)
+		default:
+			err = errors.New(fmt.Sprintf("unknown command: %v", event.Command))
 		}
 
 		if err != nil {
 			log.Printf(
-				"Error during event %s: %v for socket %v",
+				"Error during event %s: %v",
 				event.Command,
 				err.Error(),
-				socket.context.deviceId,
 			)
 			response = EventResponse{
 				Uuid:    event.Uuid,
@@ -186,12 +205,16 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				Result:  "error",
 				Data:    err.Error(),
 			}
+		} else {
+			log.Printf(
+				"Successfuly handled event %s",
+				event.Command,
+			)
 		}
 
 		if err = socket.conn.WriteJSON(response); err != nil {
 			log.Printf("Could not send response to socket %s: %v", socket.context.deviceId, socket)
 		}
-
 	}
 }
 
@@ -208,20 +231,50 @@ func authorizeDevice(socket *Socket, event Event) (EventResponse, error) {
 		return EventResponse{}, err
 	}
 
-	if _, err = getAttachedDevice(dto.DeviceId, token); err != nil {
-		return EventResponse{}, err
-	}
+	if device, deviceErr := getAttachedDevice(dto.DeviceId, token); deviceErr != nil {
+		return EventResponse{}, deviceErr
+	} else {
+		sendToRoom("admin", Event{
+			Uuid:    uuid.New(),
+			Command: "device-authorized",
+			Data: DeviceAuthorizedDto{
+				DeviceId:   dto.DeviceId,
+				DeviceName: device.DeviceName,
+			},
+		})
 
-	socket.context = SocketContext{
-		connType:          InputDevice,
-		deviceId:          dto.DeviceId,
-		authorizationUUID: token,
+		socket.context = SocketContext{
+			connType:          InputDevice,
+			deviceId:          dto.DeviceId,
+			deviceName:        device.DeviceName,
+			authorizationUUID: token,
+		}
 	}
 
 	return EventResponse{
 		Uuid:    event.Uuid,
 		Command: event.Command,
 		Result:  "success",
+	}, nil
+}
+
+func getDevices(event Event) (EventResponse, error) {
+	devices := make([]DeviceAuthorizedDto, 0)
+
+	for _, c := range connections {
+		if c.context.connType == InputDevice {
+			devices = append(devices, DeviceAuthorizedDto{
+				DeviceId:   c.context.deviceId,
+				DeviceName: c.context.deviceName,
+			})
+		}
+	}
+
+	return EventResponse{
+		Uuid:    event.Uuid,
+		Command: event.Command,
+		Result:  "success",
+		Data:    devices,
 	}, nil
 }
 
