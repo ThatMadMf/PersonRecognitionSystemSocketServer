@@ -17,6 +17,7 @@ import (
 )
 
 var connections = make([]Socket, 0)
+var db = GetBunDb()
 
 func main() {
 	router := mux.NewRouter().StrictSlash(true)
@@ -204,6 +205,10 @@ func authorizeDevice(socket *Socket, event Event) (EventResponse, error) {
 	token, err := uuid.Parse(dto.AuthToken)
 
 	if err != nil {
+		return EventResponse{}, err
+	}
+
+	if _, err = getAttachedDevice(dto.DeviceId, token); err != nil {
 		return EventResponse{}, err
 	}
 
