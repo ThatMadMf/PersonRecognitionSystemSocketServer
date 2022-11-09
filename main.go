@@ -31,6 +31,12 @@ func main() {
 const InputDevice = "INPUT_DEVICE"
 const Admin = "ADMIN"
 
+const FaceNotDetectedResult = "face not detected"
+const NotRecognizedResult = "not recognized"
+const RecognizedResult = "recognized"
+
+const SessionCapturesLimit = 10
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
@@ -286,14 +292,48 @@ func faceCaptureFrame(socket Socket, event Event) (EventResponse, error) {
 		return EventResponse{}, err
 	}
 
-	if _, err := getCaptureSession(socket.context.deviceId); err == nil {
-		if recognizedImage, err := recognition(dto.Image); err != nil {
-			image = dto.Image
-		} else {
-			image = recognizedImage
+	image = dto.Image
+
+	if session, err := getCaptureSession(socket.context.deviceId); err == nil {
+		//if count, countErr := getSessionFramesCount(session.ID); countErr != nil {
+		//	log.Printf("Could not count session frames: %v", countErr)
+		//} else if count > SessionCapturesLimit {
+		//
+		//}
+
+		response, err := recognition(dto.Image)
+		if err != nil {
+			return EventResponse{}, err
 		}
-	} else {
-		image = dto.Image
+		switch response.Result {
+		case FaceNotDetectedMessage:
+			log.Println("not recognized")
+		case NotRecognizedResult:
+			if err = createSessionFrame(SessionFrame{
+				FrameDetails: response.Result,
+				Timestamp:    time.Now(),
+				SessionID:    session.ID,
+			}); err != nil {
+				log.Printf("Could not create session frame record: %v", err)
+			}
+
+		case RecognizedResult:
+			image = response.Image
+			if err = createSessionFrame(SessionFrame{
+				FrameDetails: response.Result,
+				Timestamp:    time.Now(),
+				SessionID:    session.ID,
+				Users: []*SessionFrameUser{
+					{
+						Value:  response.Confidence,
+						UserID: response.UserID,
+					},
+				},
+			}); err != nil {
+				log.Printf("Could not create session frame record: %v", err)
+			}
+		}
+
 	}
 
 	sendToRoom("admin", Event{

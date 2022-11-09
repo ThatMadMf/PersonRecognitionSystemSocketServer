@@ -24,7 +24,7 @@ func getEnvOrDefaultValue(envKey string, defaultValue string) string {
 type AttachedDevice struct {
 	bun.BaseModel `bun:"table:attached_input_devices,alias:aid"`
 
-	ID         int64     `bun:"id"`
+	ID         int64     `bun:"id,pk,autoincrement"`
 	DeviceName string    `bun:"device_name"`
 	DeviceCode string    `bun:"device_code"`
 	AuthToken  uuid.UUID `bun:"auth_token"`
@@ -34,9 +34,30 @@ type AttachedDevice struct {
 type CaptureSession struct {
 	bun.BaseModel `bun:"table:capture_sessions,alias:cs"`
 
-	ID          int64     `bun:"id"`
+	ID          int64     `bun:"id,pk,autoincrement"`
 	SessionType string    `bun:"session_type"`
 	EndTime     null.Time `bun:"end_time"`
+}
+
+type SessionFrame struct {
+	bun.BaseModel `bun:"table:session_frames,alias:sf"`
+
+	ID           int64     `bun:"id,pk,autoincrement"`
+	FrameDetails string    `bun:"frame_details"`
+	Timestamp    time.Time `bun:"timestamp"`
+	SessionID    int64     `bun:"capture_session_id"`
+
+	Users []*SessionFrameUser `bun:"-"`
+}
+
+type SessionFrameUser struct {
+	bun.BaseModel `bun:"table:session_frame_users"`
+
+	ID    int64   `bun:"id,pk,autoincrement"`
+	Value float64 `bun:"value"`
+
+	FrameID int64 `bun:"session_frame_id"`
+	UserID  int64 `bun:"user_id"`
 }
 
 func getAttachedDevice(deviceCode string, authToken uuid.UUID) (AttachedDevice, error) {
@@ -60,6 +81,43 @@ func getCaptureSession(deviceId string) (CaptureSession, error) {
 		Scan(context.Background())
 
 	return session, err
+}
+
+func createSessionFrame(frame SessionFrame) error {
+	tx, err := db.BeginTx(context.Background(), &sql.TxOptions{})
+
+	err = func(idb bun.IDB) error {
+		if _, err = idb.NewInsert().Model(&frame).Exec(context.Background()); err != nil {
+			return err
+		}
+
+		if len(frame.Users) > 0 {
+			for _, u := range frame.Users {
+				u.FrameID = frame.ID
+			}
+
+			if _, err = idb.NewInsert().Model(&frame.Users).Exec(context.Background()); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}(tx)
+
+	if err != nil {
+		_ = tx.Rollback()
+
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func getSessionFramesCount(sessionID int64) (int, error) {
+	return db.NewSelect().
+		Model(&SessionFrame{}).
+		Where("capture_session_id = ?", sessionID).
+		Count(context.Background())
 }
 
 func GetBunDb() *bun.DB {
