@@ -180,7 +180,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 
-			response, err = startCaptureSession()
+			response, err = startCaptureSession(socket, event)
 		case "face-capture-frame":
 			if socket.context.connType != InputDevice {
 				err = errors.New("not authorized as input device")
@@ -280,8 +280,20 @@ func getDevices(event Event) (EventResponse, error) {
 
 func faceCaptureFrame(socket Socket, event Event) (EventResponse, error) {
 	var dto FaceCaptureFrameDto
+	var image string
+
 	if err := mapstructure.Decode(event.Data, &dto); err != nil {
 		return EventResponse{}, err
+	}
+
+	if _, err := getCaptureSession(socket.context.deviceId); err == nil {
+		if recognizedImage, err := recognition(dto.Image); err != nil {
+			image = dto.Image
+		} else {
+			image = recognizedImage
+		}
+	} else {
+		image = dto.Image
 	}
 
 	sendToRoom("admin", Event{
@@ -289,7 +301,7 @@ func faceCaptureFrame(socket Socket, event Event) (EventResponse, error) {
 		Command: "frame-captured",
 		Data: FrameCapturedDto{
 			DeviceId: socket.context.deviceId,
-			Image:    dto.Image,
+			Image:    image,
 		},
 	})
 
@@ -300,8 +312,22 @@ func faceCaptureFrame(socket Socket, event Event) (EventResponse, error) {
 	}, nil
 }
 
-func startCaptureSession() (EventResponse, error) {
-	panic("not implemented")
+func startCaptureSession(socket Socket, event Event) (EventResponse, error) {
+	if _, err := getCaptureSession(socket.context.deviceId); err == nil {
+		return EventResponse{}, errors.New("capture session already exists")
+	}
+
+	if err := createCaptureSession(CreateCaptureSessionDto{
+		AttachedDeviceToken: socket.context.authorizationUUID,
+	}); err != nil {
+		return EventResponse{}, err
+	}
+
+	return EventResponse{
+		Uuid:    event.Uuid,
+		Command: event.Command,
+		Result:  "success",
+	}, nil
 }
 
 func serveFrame(rawImage string) {

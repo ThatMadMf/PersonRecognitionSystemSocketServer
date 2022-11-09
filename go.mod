@@ -20,5 +20,6 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	golang.org/x/crypto v0.0.0-20220826181053-bd7e27e6170d // indirect
 	golang.org/x/sys v0.0.0-20220825204002-c680a09ffe64 // indirect
+	gopkg.in/guregu/null.v4 v4.0.0 // indirect
 	mellium.im/sasl v0.3.0 // indirect
 )
