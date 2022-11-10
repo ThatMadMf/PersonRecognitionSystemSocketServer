@@ -31,6 +31,8 @@ func main() {
 const InputDevice = "INPUT_DEVICE"
 const Admin = "ADMIN"
 
+const AuthorizationResultEvent = "authorization-result"
+
 const FaceNotDetectedResult = "face not detected"
 const NotRecognizedResult = "not recognized"
 const RecognizedResult = "recognized"
@@ -98,6 +100,12 @@ type FaceCaptureFrameDto struct {
 type FrameCapturedDto struct {
 	DeviceId string `json:"deviceId"`
 	Image    string `json:"image"`
+}
+
+type AuthorizationDto struct {
+	Result  string `json:"result"`
+	Message string `json:"message"`
+	Token   string `json:"token"`
 }
 
 func removeSocket(socket Socket) {
@@ -295,11 +303,32 @@ func faceCaptureFrame(socket Socket, event Event) (EventResponse, error) {
 	image = dto.Image
 
 	if session, err := getCaptureSession(socket.context.deviceId); err == nil {
-		//if count, countErr := getSessionFramesCount(session.ID); countErr != nil {
-		//	log.Printf("Could not count session frames: %v", countErr)
-		//} else if count > SessionCapturesLimit {
-		//
-		//}
+		if count, countErr := getSessionFramesCount(session.ID); countErr != nil {
+			log.Printf("Could not count session frames: %v", countErr)
+		} else if count > SessionCapturesLimit {
+			if token, authorizationErr := completeCaptureSession(session.ID); authorizationErr != nil {
+				log.Printf("Could not complete session: %v", authorizationErr)
+
+				return EventResponse{
+					Uuid:    uuid.New(),
+					Command: AuthorizationResultEvent,
+					Result:  "error",
+					Data: AuthorizationDto{
+						Result:  "error",
+						Message: authorizationErr.Error(),
+					},
+				}, nil
+			} else {
+				return EventResponse{
+					Uuid:    uuid.New(),
+					Command: AuthorizationResultEvent,
+					Result:  "success",
+					Data: AuthorizationDto{
+						Token: token,
+					},
+				}, nil
+			}
+		}
 
 		response, err := recognition(dto.Image)
 		if err != nil {

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"io/ioutil"
-	"log"
 	"net/http"
 )
 
@@ -15,6 +14,12 @@ var APIHost = getEnvOrDefaultValue("API_HOST", "http://localhost:8000/api")
 
 type CreateCaptureSessionDto struct {
 	AttachedDeviceToken uuid.UUID `json:"attachedDeviceToken"`
+}
+
+type CompleteCaptureSessionResponseDto struct {
+	Result  string `json:"result"`
+	Token   string `json:"token"`
+	Message string `json:"message"`
 }
 
 type RecognitionDto struct {
@@ -37,30 +42,46 @@ func createCaptureSession(dto CreateCaptureSessionDto) error {
 		return parseErr
 	}
 
-	if resp, err := http.Post(
+	if _, err := http.Post(
 		fmt.Sprintf("%s/capture-sessions", APIHost),
 		"application/json",
 		bytes.NewBuffer(reqBody),
 	); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func completeCaptureSession(id int64) (string, error) {
+	if resp, err := http.Post(
+		fmt.Sprintf("%s/capture-sessions/%v/complete", APIHost, id),
+		"application/json",
+		nil,
+	); err != nil {
+		return "", err
 	} else {
 		defer func() { _ = resp.Body.Close() }()
 
 		body, err := ioutil.ReadAll(resp.Body)
 
 		if err != nil {
-			return err
+			return "", err
 		}
 
-		log.Print(string(body))
+		var bodyDto CompleteCaptureSessionResponseDto
+
+		if err = json.Unmarshal(body, &bodyDto); err != nil {
+			return "", err
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return "", errors.New(fmt.Sprintf("%s: %s", bodyDto.Result, bodyDto.Message))
+		}
+
+		return bodyDto.Token, nil
 	}
-
-	return nil
 }
-
-//func completeCaptureSession(id int64) (string, error) {
-//
-//}
 
 func recognition(image string) (RecognitionResponseDto, error) {
 	dto := RecognitionDto{Image: image}
