@@ -108,6 +108,10 @@ type AuthorizationDto struct {
 	Token   string `json:"token"`
 }
 
+type DeviceDisconnectedDto struct {
+	DeviceId string `json:"deviceId"`
+}
+
 func removeSocket(socket Socket) {
 	for i, s := range connections {
 		if s.id == socket.id {
@@ -156,6 +160,16 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	defer func() {
 		_ = conn.Close()
+
+		if socket.context.connType == InputDevice {
+			sendToRoom(
+				"admin",
+				Event{
+					Uuid:    uuid.New(),
+					Command: "device-disconnected",
+					Data:    DeviceDisconnectedDto{DeviceId: socket.context.deviceId},
+				})
+		}
 
 		removeSocket(socket)
 
