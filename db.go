@@ -47,6 +47,9 @@ type SessionFrame struct {
 	Timestamp    time.Time `bun:"timestamp"`
 	SessionID    int64     `bun:"capture_session_id"`
 
+	InputFrame  string `bun:"input_frame"`
+	OutputFrame string `bun:"output_frame"`
+
 	Users []*SessionFrameUser `bun:"-"`
 }
 

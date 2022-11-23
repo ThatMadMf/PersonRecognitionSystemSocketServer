@@ -112,6 +112,11 @@ type DeviceDisconnectedDto struct {
 	DeviceId string `json:"deviceId"`
 }
 
+type AuthorizationResultDto struct {
+	DeviceId     string `json:"deviceId"`
+	IsAuthorized bool   `json:"isAuthorized"`
+}
+
 func removeSocket(socket Socket) {
 	for i, s := range connections {
 		if s.id == socket.id {
@@ -333,6 +338,15 @@ func faceCaptureFrame(socket Socket, event Event) (EventResponse, error) {
 					},
 				}, nil
 			} else {
+				sendToRoom("admin", Event{
+					Uuid:    uuid.New(),
+					Command: AuthorizationResultEvent,
+					Data: AuthorizationResultDto{
+						DeviceId:     socket.context.deviceId,
+						IsAuthorized: true,
+					},
+				})
+
 				return EventResponse{
 					Uuid:    uuid.New(),
 					Command: AuthorizationResultEvent,
@@ -356,6 +370,7 @@ func faceCaptureFrame(socket Socket, event Event) (EventResponse, error) {
 				FrameDetails: response.Result,
 				Timestamp:    time.Now(),
 				SessionID:    session.ID,
+				InputFrame:   dto.Image,
 			}); err != nil {
 				log.Printf("Could not create session frame record: %v", err)
 			}
@@ -366,6 +381,8 @@ func faceCaptureFrame(socket Socket, event Event) (EventResponse, error) {
 				FrameDetails: response.Result,
 				Timestamp:    time.Now(),
 				SessionID:    session.ID,
+				InputFrame:   dto.Image,
+				OutputFrame:  response.Image,
 				Users: []*SessionFrameUser{
 					{
 						Value:  response.Confidence,
